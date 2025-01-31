@@ -66,15 +66,6 @@ jobs:
           SHA=$(sha256sum $GZ | cut -d ' ' -f1)
           echo "sha=$SHA" >> $GITHUB_OUTPUT
       
-      - name: Archive
-        id: archive
-        run: |
-          GZ="${NAME}-android-arm64-${VERSION}.tgz"
-          tar -caf $GZ ./${NAME}
-          echo "gz=$GZ" >> $GITHUB_OUTPUT
-          SHA=$(sha256sum $GZ | cut -d ' ' -f1)
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-      
       - name: Save Version
         run: |
           echo "${{ env.VERSION }}" > version.txt
