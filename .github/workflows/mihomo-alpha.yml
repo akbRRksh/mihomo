@@ -3,7 +3,7 @@ on:
   workflow_dispatch
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,17 +19,15 @@ jobs:
           excludes: prerelease, draft
       
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v4
         with:
           go-version: stable
       
       - name: Install Android NDK
         run: |
-          # Download NDK r25b
           wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
           echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r25b" >> $GITHUB_ENV
-          echo "$HOME/android-ndk/android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
       
       - name: Versioning
         run: |
@@ -39,25 +37,34 @@ jobs:
           echo "BUILDTIME=$BUILDTIME" >> $GITHUB_ENV
           HASH_COMMIT=$(git rev-parse --short HEAD)
           TAG_RELEASE=${{ steps.latest_tag.outputs.release }}
-          VERSION=alpha-${HASH_COMMIT}
           RELEASE_COMMIT_SHA=$(curl -s "https://api.github.com/repos/MetaCubeX/mihomo/git/ref/tags/${TAG_RELEASE}" | jq -r '.object.sha' | cut -c -7)
+          VERSION=alpha-${HASH_COMMIT}
+          
           echo "URL_CHANGE=https://www.github.com/metacubex/mihomo/compare/${RELEASE_COMMIT_SHA}...${HASH_COMMIT}" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAGS=with_gvisor,with_low_memory" >> $GITHUB_ENV
           echo "LDFLAGS=-X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} ${TAG_RELEASE}' -w -s -buildid=" >> $GITHUB_ENV
+          echo "C_COMPILER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
       
       - name: Build
         run: |
-          NDK_PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
           CGO_ENABLED=1 \
-          CC=$NDK_PATH/bin/aarch64-linux-android21-clang \
-          GOOS=android \
+          CC=${{ env.C_COMPILER }} \
           GOARCH=arm64 \
-          CGO_CFLAGS="-I$NDK_PATH/sysroot/usr/include" \
+          GOOS=android \
           go build -tags "${{ env.TAGS }}" \
           -trimpath \
           -ldflags "${{ env.LDFLAGS }}" \
           -o ./${NAME}
+      
+      - name: Archive
+        id: archive
+        run: |
+          GZ="${NAME}-android-arm64-${VERSION}.tgz"
+          tar -caf $GZ ./${NAME}
+          echo "gz=$GZ" >> $GITHUB_OUTPUT
+          SHA=$(sha256sum $GZ | cut -d ' ' -f1)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
       
       - name: Archive
         id: archive
