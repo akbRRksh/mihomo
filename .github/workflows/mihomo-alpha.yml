@@ -17,7 +17,7 @@ jobs:
           repository: MetaCubeX/mihomo
           excludes: prerelease, draft
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v4
         with:
           go-version: stable
       - name: Versioning
