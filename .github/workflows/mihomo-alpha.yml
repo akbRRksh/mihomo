@@ -48,7 +48,7 @@ jobs:
           HASH_COMMIT=$(git rev-parse --short HEAD)
           echo "HASH_COMMIT=$HASH_COMMIT" >> $GITHUB_ENV
           echo "URL_COMMIT=https://github.com/metacubex/mihomo/commit/$HASH_COMMIT" >> $GITHUB_ENV
-          VERSION="${{ steps.latest_tag.outputs.release }}-$HASH_COMMIT"
+          VERSION=alpha-${HASH_COMMIT}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAGS=with_gvisor,with_low_memory" >> $GITHUB_ENV
           BUILDTAG="-extldflags --static"
