@@ -4,6 +4,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [android-arm64, linux-arm64]  # Matriks untuk kedua arsitektur
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,7 +26,8 @@ jobs:
         with:
           go-version: '1.23.4'
       
-      - name: Install Android NDK
+      - name: Install Android NDK (hanya untuk android-arm64)
+        if: matrix.arch == 'android-arm64'
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
@@ -44,48 +48,37 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAGS=with_gvisor,with_low_memory" >> $GITHUB_ENV
           echo "LDFLAGS=-X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} ${TAG_RELEASE}' -w -s -buildid=" >> $GITHUB_ENV
-          echo "C_COMPILER_ANDROID=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
-          echo "C_COMPILER_LINUX=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
       
-      - name: Build Android ARM64
+      - name: Set Compiler and Environment Variables
+        run: |
+          if [ "${{ matrix.arch }}" == "android-arm64" ]; then
+            echo "C_COMPILER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+            echo "GOOS=android" >> $GITHUB_ENV
+          elif [ "${{ matrix.arch }}" == "linux-arm64" ]; then
+            echo "C_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+            echo "GOOS=linux" >> $GITHUB_ENV
+          fi
+          echo "GOARCH=arm64" >> $GITHUB_ENV
+      
+      - name: Build
         run: |
           CGO_ENABLED=1 \
-          CC=${{ env.C_COMPILER_ANDROID }} \
-          GOARCH=arm64 \
-          GOOS=android \
+          CC=${{ env.C_COMPILER }} \
+          GOARCH=${{ env.GOARCH }} \
+          GOOS=${{ env.GOOS }} \
           go build -tags "${{ env.TAGS }}" \
           -trimpath \
           -ldflags "${{ env.LDFLAGS }}" \
-          -o ./${NAME}-android-arm64
+          -o ./${NAME}-${{ matrix.arch }}
       
-      - name: Build Linux ARM64
+      - name: Archive
+        id: archive
         run: |
-          CGO_ENABLED=1 \
-          CC=${{ env.C_COMPILER_LINUX }} \
-          GOARCH=arm64 \
-          GOOS=linux \
-          go build -tags "${{ env.TAGS }}" \
-          -trimpath \
-          -ldflags "${{ env.LDFLAGS }}" \
-          -o ./${NAME}-linux-arm64
-      
-      - name: Archive Android ARM64
-        id: archive_android
-        run: |
-          GZ_ANDROID="${NAME}-android-arm64-${VERSION}.tgz"
-          tar -caf $GZ_ANDROID ./${NAME}-android-arm64
-          echo "gz_android=$GZ_ANDROID" >> $GITHUB_OUTPUT
-          SHA_ANDROID=$(sha256sum $GZ_ANDROID | cut -d ' ' -f1)
-          echo "sha_android=$SHA_ANDROID" >> $GITHUB_OUTPUT
-      
-      - name: Archive Linux ARM64
-        id: archive_linux
-        run: |
-          GZ_LINUX="${NAME}-linux-arm64-${VERSION}.tgz"
-          tar -caf $GZ_LINUX ./${NAME}-linux-arm64
-          echo "gz_linux=$GZ_LINUX" >> $GITHUB_OUTPUT
-          SHA_LINUX=$(sha256sum $GZ_LINUX | cut -d ' ' -f1)
-          echo "sha_linux=$SHA_LINUX" >> $GITHUB_OUTPUT
+          GZ="${NAME}-${{ matrix.arch }}-${VERSION}.tgz"
+          tar -caf $GZ ./${NAME}-${{ matrix.arch }}
+          echo "gz=$GZ" >> $GITHUB_OUTPUT
+          SHA=$(sha256sum $GZ | cut -d ' ' -f1)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
       
       - name: Save Version
         run: |
@@ -94,7 +87,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: "build-artifacts"
+          name: "${{ matrix.arch }}"
           path: |
             *.tgz
             version.txt
@@ -112,7 +105,8 @@ jobs:
       - name: Move to folder
         run: |
           mkdir release
-          cp bin/build-artifacts/* release/
+          cp bin/android-arm64/* release/
+          cp bin/linux-arm64/* release/
           ls -R release
       
       - name: Load VERSION
