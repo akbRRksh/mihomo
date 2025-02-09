@@ -1,136 +1,162 @@
-name: MiHomo-Alpha
+name: MiHomo-Test
 on:
-  workflow_dispatch
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [android-arm64, linux-arm64]  # Matriks untuk kedua arsitektur
+        jobs:
+          - { goos: linux, goarch: arm64, output: arm64 }
+          - { goos: linux, goarch: arm, goarm: '7', output: armv7 }
+          - { goos: android, goarch: arm, ndk: armv7a-linux-androideabi34, output: armv7 }
+          - { goos: android, goarch: arm64, ndk: aarch64-linux-android34, output: arm64-v8 }
+
     steps:
-      - name: Checkout
+      - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
           repository: MetaCubeX/mihomo
           ref: Alpha
-      
-      - name: Get Latest tag
+
+      - name: Get Latest Tag
         id: latest_tag
         uses: pozetroninc/github-action-get-latest-release@master
         with:
           repository: MetaCubeX/mihomo
-          excludes: prerelease, draft
-      
-      - name: Setup Go
-        uses: actions/setup-go@v4
+          excludes: draft
+
+      - name: Set up Go
+        if: ${{ matrix.jobs.goversion == '' && matrix.jobs.abi != '1' }}
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23.4'
-      
-      - name: Install Android NDK (hanya untuk android-arm64)
-        if: matrix.arch == 'android-arm64'
-        run: |
-          wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-          unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
-          echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r25b" >> $GITHUB_ENV
-      
-      - name: Install aarch64-linux-gnu-gcc (hanya untuk linux-arm64)
-        if: matrix.arch == 'linux-arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      
-      - name: Versioning
+          go-version: '1.23'
+
+      - name: Set up Go
+        if: ${{ matrix.jobs.goversion != '' && matrix.jobs.abi != '1' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.jobs.goversion }}
+
+      - name: Set Time and Build Variables
         run: |
           sudo timedatectl set-timezone "Asia/Jakarta"
           echo "NAME=mihomo" >> $GITHUB_ENV
           BUILDTIME=$(date)
           echo "BUILDTIME=$BUILDTIME" >> $GITHUB_ENV
           HASH_COMMIT=$(git rev-parse --short HEAD)
-          TAG_RELEASE=${{ steps.latest_tag.outputs.release }}
-          RELEASE_COMMIT_SHA=$(curl -s "https://api.github.com/repos/MetaCubeX/mihomo/git/ref/tags/${TAG_RELEASE}" | jq -r '.object.sha' | cut -c -7)
-          VERSION=alpha-${HASH_COMMIT}
-          
-          echo "URL_CHANGE=https://www.github.com/metacubex/mihomo/compare/${RELEASE_COMMIT_SHA}...${HASH_COMMIT}" >> $GITHUB_ENV
+          echo "HASH_COMMIT=$HASH_COMMIT" >> $GITHUB_ENV
+          echo "URL_COMMIT=https://github.com/metacubex/mihomo/commit/$HASH_COMMIT" >> $GITHUB_ENV
+          VERSION="${{ steps.latest_tag.outputs.release }}-$HASH_COMMIT"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAGS=with_gvisor,with_low_memory" >> $GITHUB_ENV
-          echo "LDFLAGS=-X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} ${TAG_RELEASE}' -w -s -buildid=" >> $GITHUB_ENV
-      
-      - name: Set Compiler and Environment Variables
+          BUILDTAG="-extldflags --static"
+          echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
+          echo "LDFLAGS=$BUILDTAG -X 'github.com/metacubex/mihomo/constant.Version=$VERSION' -X 'github.com/metacubex/mihomo/constant.BuildTime=$BUILDTIME' -w -s -buildid=" >> $GITHUB_ENV
+
+      # Caching NDK
+      - name: Cache NDK
+        uses: actions/cache@v3
+        with:
+          path: ${{ runner.tool_cache }}/android-ndk
+          key: android-ndk-${{ matrix.jobs.goos }}-${{ matrix.jobs.ndk }}
+          restore-keys: |
+            android-ndk-${{ matrix.jobs.goos }}-
+
+      - name: Setup NDK
+        if: ${{ matrix.jobs.goos == 'android' }}
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28-beta1
+
+      - name: Set NDK path
+        if: ${{ matrix.jobs.goos == 'android' }}
         run: |
-          if [ "${{ matrix.arch }}" == "android-arm64" ]; then
-            echo "C_COMPILER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
-            echo "GOOS=android" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" == "linux-arm64" ]; then
-            echo "C_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            echo "GOOS=linux" >> $GITHUB_ENV
-          fi
-          echo "GOARCH=arm64" >> $GITHUB_ENV
-      
-      - name: Build
+          echo "CC=${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{matrix.jobs.ndk}}-clang" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "BUILDTAG=" >> $GITHUB_ENV
+          echo "LDFLAGS=$BUILDTAG -X 'github.com/metacubex/mihomo/constant.Version=$VERSION' -X 'github.com/metacubex/mihomo/constant.BuildTime=$BUILDTIME' -w -s -buildid=" >> $GITHUB_ENV
+
+      - name: Debug Variables
         run: |
-          CGO_ENABLED=1 \
-          CC=${{ env.C_COMPILER }} \
-          GOARCH=${{ env.GOARCH }} \
-          GOOS=${{ env.GOOS }} \
-          go build -tags "${{ env.TAGS }}" \
-          -trimpath \
-          -ldflags "${{ env.LDFLAGS }}" \
-          -o ./${NAME}-${{ matrix.arch }}
-      
-      - name: Archive
-        id: archive
+          echo "VERSION: ${{ env.VERSION }}"
+          echo "TAGS: ${{ env.TAGS }}"
+          echo "LDFLAGS: ${{ env.LDFLAGS }}"
+
+      - name: Build Application
+        env:
+          GOOS: ${{ matrix.jobs.goos }}
+          GOARCH: ${{ matrix.jobs.goarch }}
+          GOARM: ${{ matrix.jobs.goarm }}
+          GOOUTPUT: ${{ matrix.jobs.output }}
+          VERSION: ${{ env.VERSION }}
+          TAGS: ${{ env.TAGS }}
+          LDFLAGS: ${{ env.LDFLAGS }}
         run: |
-          GZ="${NAME}-${{ matrix.arch }}-${VERSION}.tgz"
-          tar -caf $GZ ./${NAME}-${{ matrix.arch }}
-          echo "gz=$GZ" >> $GITHUB_OUTPUT
-          SHA=$(sha256sum $GZ | cut -d ' ' -f1)
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-      
+          echo "Building for $GOOS/$GOARCH..."
+          go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS"
+          gzip -c mihomo > mihomo-${GOOS}-${GOOUTPUT}-${VERSION}.gz
+          rm mihomo
+
       - name: Save Version
         run: |
           echo "${{ env.VERSION }}" > version.txt
-      
+          ls -R
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ matrix.arch }}"
+          name: "${{ matrix.jobs.goos }}-${{ matrix.jobs.output }}"
           path: |
-            *.tgz
+            mihomo*.gz
             version.txt
+          if-no-files-found: warn
 
   upload:
     permissions: write-all
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: build
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: bin/
-      
+
       - name: Move to folder
         run: |
-          mkdir release
-          cp bin/android-arm64/* release/
-          cp bin/linux-arm64/* release/
-          ls -R release
-      
+          mkdir oke
+          for i in bin/*;do
+            for ii in $i/*;do
+              cp -rf $ii oke
+            done
+          done
+          rm -rf bin
+          ls -R oke
+
       - name: Load VERSION
         run: |
-          VERSION=$(cat release/version.txt)
+          VERSION=$(cat oke/version.txt)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-      
+          
       - name: Tag Repo
         uses: richardsimko/update-tag@v1
         with:
-          tag_name: ${{ env.VERSION }}
+          tag_name: ${{env.VERSION }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+            
+      - name: Display structure of downloaded files
+        run: ls -R
+  
       - name: Upload Release
         uses: softprops/action-gh-release@v1
+        if: ${{ success() }}
         with:
-          tag_name: ${{ env.VERSION }}
-          files: release/*
+          tag_name: ${{env.VERSION }}
+          files: |
+            oke/*
           prerelease: false
           generate_release_notes: true
+          
