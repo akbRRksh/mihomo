@@ -1,46 +1,45 @@
 name: MiHomo-Alpha
-
 on:
   workflow_dispatch
-
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         arch: [android-arm64, linux-arm64]  # Matriks untuk kedua arsitektur
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           repository: MetaCubeX/mihomo
           ref: Alpha
-
-      - name: Get Latest Tag
+      
+      - name: Get Latest tag
         id: latest_tag
         uses: pozetroninc/github-action-get-latest-release@master
         with:
           repository: MetaCubeX/mihomo
           excludes: prerelease, draft
-
+      
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.23.4'
-
-      - name: Install Dependencies (Linux)
-        if: matrix.arch == 'linux-arm64'
-        run: sudo apt update && sudo apt install -y gcc-aarch64-linux-gnu
-
-      - name: Install Android NDK (Android)
+      
+      - name: Install Android NDK (hanya untuk android-arm64)
         if: matrix.arch == 'android-arm64'
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
           echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r25b" >> $GITHUB_ENV
-
-      - name: Set Version Information
+      
+      - name: Install aarch64-linux-gnu-gcc (hanya untuk linux-arm64)
+        if: matrix.arch == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      
+      - name: Versioning
         run: |
           sudo timedatectl set-timezone "Asia/Jakarta"
           echo "NAME=mihomo" >> $GITHUB_ENV
@@ -55,7 +54,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAGS=with_gvisor,with_low_memory" >> $GITHUB_ENV
           echo "LDFLAGS=-X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} ${TAG_RELEASE}' -w -s -buildid=" >> $GITHUB_ENV
-
+      
       - name: Set Compiler and Environment Variables
         run: |
           if [ "${{ matrix.arch }}" == "android-arm64" ]; then
@@ -66,7 +65,7 @@ jobs:
             echo "GOOS=linux" >> $GITHUB_ENV
           fi
           echo "GOARCH=arm64" >> $GITHUB_ENV
-
+      
       - name: Build
         run: |
           CGO_ENABLED=1 \
@@ -77,8 +76,8 @@ jobs:
           -trimpath \
           -ldflags "${{ env.LDFLAGS }}" \
           -o ./${NAME}-${{ matrix.arch }}
-
-      - name: Archive Build
+      
+      - name: Archive
         id: archive
         run: |
           GZ="${NAME}-${{ matrix.arch }}-${VERSION}.tgz"
@@ -86,11 +85,11 @@ jobs:
           echo "gz=$GZ" >> $GITHUB_OUTPUT
           SHA=$(sha256sum $GZ | cut -d ' ' -f1)
           echo "sha=$SHA" >> $GITHUB_OUTPUT
-
-      - name: Save Version Info
+      
+      - name: Save Version
         run: |
           echo "${{ env.VERSION }}" > version.txt
-
+      
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -101,35 +100,34 @@ jobs:
 
   upload:
     permissions: write-all
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
-
     steps:
-      - name: Download Build Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: bin/
-
-      - name: Organize Release Files
+      
+      - name: Move to folder
         run: |
-          mkdir -p release
-          cp bin/android-arm64/* release/ || true
-          cp bin/linux-arm64/* release/ || true
+          mkdir release
+          cp bin/android-arm64/* release/
+          cp bin/linux-arm64/* release/
           ls -R release
-
-      - name: Load Version
+      
+      - name: Load VERSION
         run: |
           VERSION=$(cat release/version.txt)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - name: Create GitHub Tag
+      
+      - name: Tag Repo
         uses: richardsimko/update-tag@v1
         with:
           tag_name: ${{ env.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release to GitHub
+      
+      - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.VERSION }}
