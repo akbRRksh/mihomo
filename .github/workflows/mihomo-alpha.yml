@@ -40,6 +40,12 @@ jobs:
           unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
           echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r25b" >> $GITHUB_ENV
       
+      - name: Install Dependencies (hanya untuk linux-arm64)
+        if: matrix.arch == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Versioning
         run: |
           sudo timedatectl set-timezone "Asia/Jakarta"
