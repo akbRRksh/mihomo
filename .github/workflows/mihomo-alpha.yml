@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [android-arm64, linux-arm64]  # Build untuk kedua arsitektur
+        arch: [android-arm64, linux-arm64]  # Matriks untuk kedua arsitektur
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,7 +14,7 @@ jobs:
           repository: MetaCubeX/mihomo
           ref: Alpha
       
-      - name: Get Latest tag
+      - name: Get Latest Tag
         id: latest_tag
         uses: pozetroninc/github-action-get-latest-release@master
         with:
@@ -40,12 +40,10 @@ jobs:
           unzip android-ndk-r25b-linux.zip -d $HOME/android-ndk
           echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r25b" >> $GITHUB_ENV
       
-      - name: Install Dependencies (hanya untuk linux-arm64)
+      - name: Install Linux ARM64 Compiler (hanya untuk linux-arm64)
         if: matrix.arch == 'linux-arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      
       - name: Versioning
         run: |
           sudo timedatectl set-timezone "Asia/Jakarta"
@@ -70,7 +68,7 @@ jobs:
           elif [ "${{ matrix.arch }}" == "linux-arm64" ]; then
             echo "C_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
             echo "GOOS=linux" >> $GITHUB_ENV
-            echo "LDFLAGS=-static -w -s -extldflags \"-static\"" >> $GITHUB_ENV  # Static linking
+            echo "EXTLDFLAGS=-static" >> $GITHUB_ENV  # Static linking untuk Linux ARM64
           fi
           echo "GOARCH=arm64" >> $GITHUB_ENV
       
@@ -82,7 +80,7 @@ jobs:
           GOOS=${{ env.GOOS }} \
           go build -tags "${{ env.TAGS }}" \
           -trimpath \
-          -ldflags "${{ env.LDFLAGS }}" \
+          -ldflags "${{ env.LDFLAGS }} -extldflags '${{ env.EXTLDFLAGS }}'" \
           -o ./${NAME}-${{ matrix.arch }}
       
       - name: Archive
@@ -116,7 +114,7 @@ jobs:
         with:
           path: bin/
       
-      - name: Move to folder
+      - name: Move to Folder
         run: |
           mkdir release
           cp bin/android-arm64/* release/
